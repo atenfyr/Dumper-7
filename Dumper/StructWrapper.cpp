@@ -29,6 +29,11 @@ std::string StructWrapper::GetRawName() const
     return bIsUnrealStruct ? Struct.GetName() : PredefStruct->UniqueName;
 }
 
+std::string StructWrapper::GetPathName() const
+{
+    return bIsUnrealStruct ? Struct.GetPathName() : "";
+}
+
 std::string StructWrapper::GetFullName() const
 {
     return bIsUnrealStruct ? Struct.GetFullName() : "Predefined struct " + PredefStruct->UniqueName;

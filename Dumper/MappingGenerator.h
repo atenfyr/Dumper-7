@@ -126,10 +126,10 @@ private:
 
 private:
     static void GeneratePropertyType(UEProperty Property, std::stringstream& Data, std::stringstream& NameTable);
-    static void GeneratePropertyInfo(const PropertyWrapper& Property, std::stringstream& Data, std::stringstream& NameTable, int32& Index);
+    static bool GeneratePropertyInfo(const PropertyWrapper& Property, std::stringstream& Data, std::stringstream& NameTable, int32& Index);
 
-    static void GenerateStruct(const StructWrapper& Struct, std::stringstream& Data, std::stringstream& NameTable);
-    static void GenerateEnum(const EnumWrapper& Enum, std::stringstream& Data, std::stringstream& NameTable);
+    static bool GenerateStruct(const StructWrapper& Struct, std::stringstream& Data, std::stringstream& NameTable, std::vector<int32>& modulePaths, std::unordered_set<std::string>& fullNamesAlreadySerialized);
+    static bool GenerateEnum(const EnumWrapper& Enum, std::stringstream& Data, std::stringstream& NameTable, std::vector<int32>& modulePaths);
 
     static std::stringstream GenerateFileData();
     static void GenerateFileHeader(StreamType& InUsmap, const std::stringstream& Data);

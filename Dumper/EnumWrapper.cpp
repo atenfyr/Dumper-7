@@ -26,6 +26,11 @@ std::string EnumWrapper::GetFullName() const
     return Enum.GetFullName();
 }
 
+std::string EnumWrapper::GetPathName() const
+{
+    return Enum.GetPathName();
+}
+
 std::pair<std::string, bool> EnumWrapper::GetUniqueName() const
 {
     const StringEntry& Name = InfoHandle.GetName();

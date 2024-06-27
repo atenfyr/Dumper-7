@@ -211,12 +211,12 @@ void MappingGenerator::GeneratePropertyType(UEProperty Property, std::stringstre
 	}
 }
 
-void MappingGenerator::GeneratePropertyInfo(const PropertyWrapper& Property, std::stringstream& Data, std::stringstream& NameTable, int32& Index)
+bool MappingGenerator::GeneratePropertyInfo(const PropertyWrapper& Property, std::stringstream& Data, std::stringstream& NameTable, int32& Index)
 {
 	if (!Property.IsUnrealProperty())
 	{
 		std::cout << "\nInvalid non-Unreal property!\n" << std::endl;
-		return;
+		return false;
 	}
 
 	WriteToStream(Data, static_cast<uint16>(Index));
@@ -228,21 +228,32 @@ void MappingGenerator::GeneratePropertyInfo(const PropertyWrapper& Property, std
 	GeneratePropertyType(Property.GetUnrealProperty(), Data, NameTable);
 
 	Index += Property.GetArrayDim();
+	return true;
 }
 
-void MappingGenerator::GenerateStruct(const StructWrapper& Struct, std::stringstream& Data, std::stringstream& NameTable)
+bool MappingGenerator::GenerateStruct(const StructWrapper& Struct, std::stringstream& Data, std::stringstream& NameTable, std::vector<int32>& modulePaths, std::unordered_set<std::string>& schemasAlreadySerialized)
 {
-	if (!Struct.IsValid())
-		return;
+	if (!Struct.IsValid()) return false;
+	const std::string uniqueKey = Struct.GetPathName(); // somewhat arbitrary; this should contain both module and class name
+	if (uniqueKey.empty() || schemasAlreadySerialized.contains(uniqueKey)) return false;
+	schemasAlreadySerialized.insert(uniqueKey);
 
+	// once we've started writing, we must complete writing and return true
 	const int32 StructNameIndex = AddNameToData(NameTable, Struct.GetRawName());
 	WriteToStream(Data, StructNameIndex);
+
+	std::string RawPathName = Struct.GetPathName();
+	std::string::size_type PathNameStart = RawPathName.find_first_of(' ') + 1;
+	std::string::size_type PathNameLength = RawPathName.find_last_of('.') - PathNameStart;
+	std::string FinalPathStr = RawPathName.substr(PathNameStart, PathNameLength);
+
+	const int32 ModulePathIndex = AddNameToData(NameTable, FinalPathStr);
+	modulePaths.push_back(ModulePathIndex);
 
 	StructWrapper Super = Struct.GetSuper();
 
 	if (Super.IsValid())
 	{
-		/* Most likely adds a duplicate to the name-table. Find a better solution later! */
 		const int32 SuperNameIndex = AddNameToData(NameTable, Super.GetRawName());
 		WriteToStream(Data, SuperNameIndex);
 	}
@@ -268,10 +279,20 @@ void MappingGenerator::GenerateStruct(const StructWrapper& Struct, std::stringst
 
 	for (const PropertyWrapper& Member : Members.IterateMembers())
 		GeneratePropertyInfo(Member, Data, NameTable, IndexIncrementedByFunction);
+	
+	return true;
 }
 
-void MappingGenerator::GenerateEnum(const EnumWrapper& Enum, std::stringstream& Data, std::stringstream& NameTable)
+bool MappingGenerator::GenerateEnum(const EnumWrapper& Enum, std::stringstream& Data, std::stringstream& NameTable, std::vector<int32>& modulePaths)
 {
+	std::string RawPathName = Enum.GetPathName();
+	std::string::size_type PathNameStart = RawPathName.find_first_of(' ') + 1;
+	std::string::size_type PathNameLength = RawPathName.find_last_of('.') - PathNameStart;
+	std::string FinalPathStr = RawPathName.substr(PathNameStart, PathNameLength);
+
+	const int32 ModulePathIndex = AddNameToData(NameTable, FinalPathStr);
+	modulePaths.push_back(ModulePathIndex);
+
 	const int32 EnumNameIndex = AddNameToData(NameTable, Enum.GetRawName());
 	WriteToStream(Data, EnumNameIndex);
 
@@ -282,6 +303,8 @@ void MappingGenerator::GenerateEnum(const EnumWrapper& Enum, std::stringstream& 
 		const int32 EnumMemberNameIdx = AddNameToData(NameTable, Member.GetUniqueName());
 		WriteToStream(Data, EnumMemberNameIdx);
 	}
+
+	return true;
 }
 
 
@@ -290,9 +313,14 @@ std::stringstream MappingGenerator::GenerateFileData()
 	std::stringstream NameData;
 	std::stringstream StructData;
 	std::stringstream EnumData;
+	std::stringstream ExtensionsData;
+
+	std::vector<int32> EnumModulePathsMap;
+	std::vector<int32> SchemaModulePathsMap;
+	std::unordered_set<std::string> schemasAlreadySerialized;
 
 	uint32 NumEnums = 0x0;
-	uint32 NumStructsAndClasse = 0x0;
+	uint32 NumStructsAndClasses = 0x0;
 
 	/* Handle all Enums first */
 	for (PackageInfoHandle Package : PackageManager::IterateOverPackageInfos())
@@ -306,7 +334,7 @@ std::stringstream MappingGenerator::GenerateFileData()
 
 		for (int32 EnumIdx : Package.GetEnums())
 		{
-			GenerateEnum(ObjectArray::GetByIndex<UEEnum>(EnumIdx), EnumData, NameData);
+			GenerateEnum(ObjectArray::GetByIndex<UEEnum>(EnumIdx), EnumData, NameData, EnumModulePathsMap);
 			NumEnums++;
 		}
 	}
@@ -323,22 +351,58 @@ std::stringstream MappingGenerator::GenerateFileData()
 
 		DependencyManager::OnVisitCallbackType GenerateStructCallback = [&](int32 Index) -> void
 		{
-			GenerateStruct(ObjectArray::GetByIndex<UEStruct>(Index), StructData, NameData);
-			NumStructsAndClasse++;
+			UEStruct thing = ObjectArray::GetByIndex<UEStruct>(Index);
+			if (GenerateStruct(thing, StructData, NameData, SchemaModulePathsMap, schemasAlreadySerialized)) NumStructsAndClasses++;
 		};
 
 		if (Package.HasStructs())
 		{
 			const DependencyManager& Structs = Package.GetSortedStructs();
+			Structs.AvoidDuplicates = false;
 			Structs.VisitAllNodesWithCallback(GenerateStructCallback);
 		}
 
 		if (Package.HasClasses())
 		{
 			const DependencyManager& Classes = Package.GetSortedClasses();
+			Classes.AvoidDuplicates = false;
 			Classes.VisitAllNodesWithCallback(GenerateStructCallback);
 		}
 	}
+
+	// extensions //
+	WriteToStream(ExtensionsData, 0x54584543); // "CEXT"
+	WriteToStream(ExtensionsData, static_cast<uint8>(0)); // extensions layout version: initial
+	WriteToStream(ExtensionsData, static_cast<uint32>(1)); // one extension
+
+	// extension 1: PPTH
+	WriteToStream(ExtensionsData, 0x48545050); // "PPTH"
+	WriteToStream(ExtensionsData, static_cast<uint32>(0)); // size, unknown for now
+
+	std::streampos extStartPos = ExtensionsData.tellp();
+	WriteToStream(ExtensionsData, static_cast<uint8>(0)); // PPTH version: initial
+
+	WriteToStream(ExtensionsData, static_cast<uint32>(NumEnums)); // enum data
+	for (int32 modulePathNameIdx : EnumModulePathsMap)
+	{
+		WriteToStream(ExtensionsData, modulePathNameIdx);
+	}
+	
+	WriteToStream(ExtensionsData, static_cast<uint32>(NumStructsAndClasses)); // schema data
+	for (int32 modulePathNameIdx : SchemaModulePathsMap)
+	{
+		WriteToStream(ExtensionsData, modulePathNameIdx);
+	}
+	std::streampos extEndPos = ExtensionsData.tellp();
+
+	ExtensionsData.seekp(extStartPos);
+	ExtensionsData.seekp(-(int32)sizeof(uint32), std::ios_base::cur);
+	WriteToStream(ExtensionsData, static_cast<uint32>(extEndPos - extStartPos));
+	ExtensionsData.seekp(extEndPos);
+
+	// etc. can add other extensions here similarly if so desired
+
+	// end of extensions //
 
 	/* Combine all of the stringstreams into one Data block representing the entire payload of the file */
 	std::stringstream ReturnBuffer;
@@ -358,11 +422,14 @@ std::stringstream MappingGenerator::GenerateFileData()
 		std::cout << std::format("MappingGeneration: NumEnums = 0x{0:X} (Dec: {0})\n", static_cast<uint32>(NumEnums));
 
 	/* Write Struct-count and enums */
-	WriteToStream(ReturnBuffer, static_cast<uint32>(NumStructsAndClasse));
+	WriteToStream(ReturnBuffer, static_cast<uint32>(NumStructsAndClasses));
 	WriteToStream(ReturnBuffer, StructData);
 
 	if constexpr (Settings::Debug::bShouldPrintMappingDebugData)
-		std::cout << std::format("MappingGeneration: NumStructsAndClasse = 0x{0:X} (Dec: {0})\n\n", static_cast<uint32>(NumStructsAndClasse));
+		std::cout << std::format("MappingGeneration: NumStructsAndClasses = 0x{0:X} (Dec: {0})\n\n", static_cast<uint32>(NumStructsAndClasses));
+
+	/* Write extensions */
+	WriteToStream(ReturnBuffer, ExtensionsData);
 
 	return ReturnBuffer;
 }

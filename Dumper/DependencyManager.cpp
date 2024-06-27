@@ -30,7 +30,8 @@ void DependencyManager::VisitIndexAndDependencies(int32 Index, OnVisitCallbackTy
 {
 	auto& [IterationHitCounter, Dependencies] = AllDependencies.at(Index);
 
-	if (IterationHitCounter >= CurrentIterationHitCount)
+	// AvoidDuplicates is a hacky flag that when disabled lets us visit the same type more than once
+	if (AvoidDuplicates && IterationHitCounter >= CurrentIterationHitCount)
 		return;
 
 	IterationHitCounter = CurrentIterationHitCount;

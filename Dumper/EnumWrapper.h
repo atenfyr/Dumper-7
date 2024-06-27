@@ -17,6 +17,7 @@ public:
     std::string GetName() const;
     std::string GetRawName() const;
     std::string GetFullName() const;
+    std::string GetPathName() const;
 
     std::pair<std::string, bool> GetUniqueName() const;
     uint8 GetUnderlyingTypeSize() const;

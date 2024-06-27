@@ -13,6 +13,9 @@ class DependencyManager
 public:
 	using OnVisitCallbackType = std::function<void(int32 Index)>;
 
+	/* Whether or not to avoid visiting the same dependency twice */
+	mutable bool AvoidDuplicates = true;
+
 private:
 	struct IndexDependencyInfo
 	{

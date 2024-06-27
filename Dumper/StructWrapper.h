@@ -35,6 +35,7 @@ public:
     std::string GetName() const;
     std::string GetRawName() const;
     std::string GetFullName() const;
+    std::string GetPathName() const;
     StructWrapper GetSuper() const;
 
     /* Name, bIsUnique */
